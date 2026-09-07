@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc --skipLibCheck",
+    "postinstall": "npm run build",
     "start": "node dist/server.js",
     "db:init": "ts-node src/db/initDb.ts"
   },
