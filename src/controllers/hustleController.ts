@@ -186,3 +186,13 @@ export const deleteHustle = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+export const clearAllHustles = async (req: Request, res: Response) => {
+  try {
+    const db = await getDatabase();
+    await db.run('DELETE FROM hustles');
+    res.json({ success: true, message: '🧹 All sample hustles cleared from database!' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
