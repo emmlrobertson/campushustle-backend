@@ -31,6 +31,29 @@ export async function initializeDatabase() {
     );
   `);
 
+  // Migration: Ensure password_hash and required columns exist on users table
+  const userTableInfo = await db.all("PRAGMA table_info(users)");
+  const userCols = userTableInfo.map((col: any) => col.name);
+  if (!userCols.includes('password_hash')) {
+    console.log('🔄 Migrating Database: Adding password_hash column to users table...');
+    await db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT;');
+  }
+  if (!userCols.includes('program')) {
+    await db.exec('ALTER TABLE users ADD COLUMN program TEXT;');
+  }
+  if (!userCols.includes('hostel_location')) {
+    await db.exec('ALTER TABLE users ADD COLUMN hostel_location TEXT;');
+  }
+  if (!userCols.includes('whats_app_number')) {
+    await db.exec('ALTER TABLE users ADD COLUMN whats_app_number TEXT;');
+  }
+  if (!userCols.includes('campus_id')) {
+    await db.exec("ALTER TABLE users ADD COLUMN campus_id TEXT DEFAULT 'knust';");
+  }
+  if (!userCols.includes('created_at')) {
+    await db.exec('ALTER TABLE users ADD COLUMN created_at TEXT;');
+  }
+
   // 3. Hustles Table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS hustles (
