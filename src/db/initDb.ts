@@ -53,8 +53,26 @@ export async function initializeDatabase() {
   if (!userCols.includes('created_at')) {
     await db.exec('ALTER TABLE users ADD COLUMN created_at TEXT;');
   }
+  if (!userCols.includes('phone_verified')) {
+    console.log('🔄 Migrating Database: Adding phone_verified column to users table...');
+    await db.exec('ALTER TABLE users ADD COLUMN phone_verified INTEGER DEFAULT 0;');
+  }
 
-  // 3. Hustles Table
+  // 3. OTP Verifications Table (Supports SMS Verification for Register & Login)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS otp_verifications (
+      id TEXT PRIMARY KEY,
+      phone_number TEXT NOT NULL,
+      email TEXT NOT NULL,
+      otp_code TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      is_verified INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // 4. Hustles Table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS hustles (
       id TEXT PRIMARY KEY,
