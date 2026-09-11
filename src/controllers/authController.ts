@@ -263,14 +263,52 @@ export const sendSmsOtpHandler = async (req: Request, res: Response) => {
     }
 
     const formattedE164 = formatToGhanaE164(targetPhone);
-    const otp = generateNumericOtp();
+
+    // Safeguard 1: Invalidate all previous unverified OTPs for this student
+    await db.run(
+      `UPDATE otp_verifications SET is_verified = -1 
+       WHERE (email = ? OR phone_number = ?) AND is_verified = 0`,
+      [cleanEmail, formattedE164]
+    );
+
+    // Safeguard 2: Fetch student's last code to guarantee no consecutive repetition
+    const previousRecord = await db.get(
+      `SELECT otp_code FROM otp_verifications 
+       WHERE (email = ? OR phone_number = ?) 
+       ORDER BY created_at DESC LIMIT 1`,
+      [cleanEmail, formattedE164]
+    );
+    const previousOtp = previousRecord ? previousRecord.otp_code : null;
+
+    // Safeguard 3: Hardware Cryptographic Generation & Global Active Collision Resistance
+    // Ensures the code does NOT repeat for this student AND is not currently active for ANY other student
+    let otp = generateNumericOtp();
+    let collisionCheckAttempts = 0;
+    const nowIso = new Date().toISOString();
+
+    while (collisionCheckAttempts < 10) {
+      if (otp !== previousOtp) {
+        // Check if any other student has this code active right now
+        const existingActive = await db.get(
+          `SELECT id FROM otp_verifications 
+           WHERE otp_code = ? AND is_verified = 0 AND expires_at > ?`,
+          [otp, nowIso]
+        );
+        if (!existingActive) {
+          break; // Unique and collision-free!
+        }
+      }
+      otp = generateNumericOtp();
+      collisionCheckAttempts++;
+    }
+
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
     const id = `otp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     // Store in otp_verifications table
     await db.run(
-      `INSERT INTO otp_verifications (id, phone_number, email, otp_code, purpose, expires_at, is_verified, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+      `INSERT INTO otp_verifications (id, phone_number, email, otp_code, purpose, expires_at, is_verified, attempts, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)`,
       [id, formattedE164, cleanEmail, otp, purpose, expiresAt, new Date().toISOString()]
     );
 
@@ -320,23 +358,40 @@ export const verifySmsOtpHandler = async (req: Request, res: Response) => {
     const cleanEmail = email ? email.trim().toLowerCase() : '';
     const cleanPhone = phone ? formatToGhanaE164(phone) : '';
 
-    // Check for matching unexpired OTP
+    // Safeguard 4: Identity-Bound Active Verification Check
     const now = new Date().toISOString();
     const record = await db.get(
       `SELECT * FROM otp_verifications 
        WHERE (email = ? OR phone_number = ?) 
-         AND otp_code = ? 
          AND purpose = ? 
          AND is_verified = 0 
          AND expires_at > ?
        ORDER BY created_at DESC LIMIT 1`,
-      [cleanEmail, cleanPhone, cleanOtp, purpose, now]
+      [cleanEmail, cleanPhone, purpose, now]
     );
 
     if (!record) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid or expired verification code. Please check the code and try again.',
+        error: 'No active verification code found for this phone/email. Please request a new code.',
+      });
+    }
+
+    // Safeguard 5: Brute-Force Rate Limiting (Max 5 attempts)
+    if (record.attempts >= 5) {
+      await db.run('UPDATE otp_verifications SET is_verified = -2 WHERE id = ?', [record.id]);
+      return res.status(429).json({
+        success: false,
+        error: 'Maximum verification attempts exceeded. For security, please request a new SMS code.',
+      });
+    }
+
+    if (record.otp_code !== cleanOtp) {
+      await db.run('UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = ?', [record.id]);
+      const remaining = 5 - (record.attempts + 1);
+      return res.status(400).json({
+        success: false,
+        error: `Incorrect verification code. ${remaining > 0 ? `${remaining} attempts remaining.` : 'Code locked out. Please request a new one.'}`,
       });
     }
 

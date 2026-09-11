@@ -68,9 +68,16 @@ export async function initializeDatabase() {
       purpose TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       is_verified INTEGER DEFAULT 0,
+      attempts INTEGER DEFAULT 0,
       created_at TEXT NOT NULL
     );
   `);
+
+  const otpTableInfo = await db.all("PRAGMA table_info(otp_verifications)");
+  const otpCols = otpTableInfo.map((col: any) => col.name);
+  if (!otpCols.includes('attempts')) {
+    await db.exec('ALTER TABLE otp_verifications ADD COLUMN attempts INTEGER DEFAULT 0;');
+  }
 
   // 4. Hustles Table
   await db.exec(`

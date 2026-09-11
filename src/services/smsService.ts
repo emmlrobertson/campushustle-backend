@@ -1,4 +1,5 @@
 import https from 'https';
+import crypto from 'crypto';
 
 /**
  * Ghana SMS Gateway Service
@@ -35,10 +36,10 @@ export function formatToGhanaE164(rawPhone: string): string {
 }
 
 /**
- * Generates a cryptographically randomized 6-digit numeric OTP
+ * Generates a cryptographically secure 6-digit numeric OTP using hardware entropy
  */
 export function generateNumericOtp(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 /**
