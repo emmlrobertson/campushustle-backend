@@ -5,8 +5,8 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc --skipLibCheck",
-    "postinstall": "npm run build",
+    "build": "prisma generate && tsc --skipLibCheck",
+    "postinstall": "prisma generate",
     "start": "node dist/server.js",
     "db:init": "ts-node src/db/initDb.ts",
     "prisma:generate": "prisma generate",
@@ -30,8 +30,10 @@
     "express-rate-limit": "^8.7.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.4.0",
+    "prisma": "^6.4.1",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
+    "typescript": "^5.3.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -42,9 +44,7 @@
     "@types/multer": "^2.2.0",
     "@types/node": "^20.11.24",
     "@types/sqlite3": "^3.1.11",
-    "prisma": "^6.4.1",
     "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^5.3.3"
+    "ts-node-dev": "^2.0.0"
   }
 }
