@@ -1,17 +1,21 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { prisma } from '../db/prisma';
+import { getJwtSecret } from '../config/jwt';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'campushustle_knust_secret_key_2026';
-
-export interface AuthenticatedRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    campus: string;
-  };
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  universityId: string;
+  role: string;
+  tokenVersion: number;
 }
 
-export const authenticateToken = (
+export interface AuthenticatedRequest extends Request {
+  user?: AuthenticatedUser;
+}
+
+export const authenticateToken = async (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
@@ -27,17 +31,62 @@ export const authenticateToken = (
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as {
-      id: string;
-      email: string;
-      campus: string;
+    const secret = getJwtSecret();
+    const decoded = jwt.verify(token, secret) as AuthenticatedUser;
+
+    // Verify user is active AND tokenVersion is still valid (Revocation Check)
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: {
+        id: true,
+        email: true,
+        isActive: true,
+        phoneVerified: true,
+        tokenVersion: true,
+      },
+    });
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({
+        success: false,
+        error: 'Account not found or has been deactivated.',
+      });
+    }
+
+    if (!user.phoneVerified) {
+      return res.status(403).json({
+        success: false,
+        error: 'Please verify your phone number to access this feature.',
+      });
+    }
+
+    // Token Invalidation Check: If user logged out or changed password, tokenVersion changed
+    if (decoded.tokenVersion && decoded.tokenVersion !== user.tokenVersion) {
+      return res.status(401).json({
+        success: false,
+        error: 'Session has expired or has been logged out. Please sign in again.',
+      });
+    }
+
+    req.user = {
+      id: user.id,
+      email: user.email,
+      universityId: decoded.universityId,
+      role: decoded.role,
+      tokenVersion: user.tokenVersion,
     };
-    req.user = decoded;
+
     next();
-  } catch (error) {
+  } catch (error: any) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization token has expired. Please log in again.',
+      });
+    }
     return res.status(403).json({
       success: false,
-      error: 'Invalid or expired Authorization token.',
+      error: 'Invalid Authorization token.',
     });
   }
 };

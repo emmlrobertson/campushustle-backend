@@ -3,24 +3,25 @@ import crypto from 'crypto';
 
 /**
  * Ghana SMS Gateway Service
- * Supports Hubtel, mNotify, Arkesel, Twilio, and Development Simulated Mode
+ * Primary Provider: BMS Africa / mNotify (Official REST API v2.0)
+ * Reference: https://developer.bms.africa/ | https://bms.africa/otp
  */
 
 export interface SendSmsResult {
   success: boolean;
   phone: string;
-  otp: string;
   message: string;
   simulated: boolean;
-  provider?: string;
+  provider: string;
+  campaignId?: string;
   error?: string;
 }
 
 /**
- * Formats a raw Ghana phone number to international E.164 (e.g. +233241234567)
+ * Formats a raw Ghana phone number to international E.164 (e.g. +233535469296)
  */
 export function formatToGhanaE164(rawPhone: string): string {
-  let cleaned = rawPhone.replace(/\D/g, '');
+  const cleaned = rawPhone.replace(/\D/g, '');
 
   if (cleaned.startsWith('233') && cleaned.length === 12) {
     return `+${cleaned}`;
@@ -36,150 +37,198 @@ export function formatToGhanaE164(rawPhone: string): string {
 }
 
 /**
- * Generates a cryptographically secure 6-digit numeric OTP using hardware entropy
+ * Formats a Ghana phone number for BMS recipient payload (e.g. "0535469296" or "233535469296")
+ */
+export function formatForBmsRecipient(rawPhone: string): string {
+  const cleaned = rawPhone.replace(/\D/g, '');
+  if (cleaned.startsWith('233') && cleaned.length === 12) {
+    return cleaned;
+  }
+  if (cleaned.startsWith('0') && cleaned.length === 10) {
+    return `233${cleaned.substring(1)}`;
+  }
+  if (cleaned.length === 9) {
+    return `233${cleaned}`;
+  }
+  return cleaned;
+}
+
+/**
+ * Generates a cryptographically secure 6-digit numeric OTP using hardware CSPRNG entropy
  */
 export function generateNumericOtp(): string {
   return crypto.randomInt(100000, 1000000).toString();
 }
 
 /**
+ * Helper to mask phone numbers for safe logging / response (e.g. "+233 53 •••• 296")
+ */
+export function maskPhoneNumber(phone: string): string {
+  const cleaned = phone.replace(/\D/g, '');
+  if (cleaned.length < 9) return '••••••••••';
+  const prefix = cleaned.slice(0, 5);
+  const suffix = cleaned.slice(-3);
+  return `+${prefix.slice(0, 3)} ${prefix.slice(3)} •••• ${suffix}`;
+}
+
+/**
  * Dispatches a 6-digit verification code via SMS to a Ghanaian mobile number
+ * Uses BMS Africa / mNotify with official OTP routing (`sms_type: "otp"`)
  */
 export async function sendSmsOtp(params: {
   phone: string;
   otp: string;
-  purpose: 'register' | 'login';
+  purpose: 'register' | 'login' | 'phone_verification';
   campusName?: string;
 }): Promise<SendSmsResult> {
   const { phone, otp, purpose, campusName = 'CampusHustle' } = params;
   const formattedPhone = formatToGhanaE164(phone);
 
   const message =
-    purpose === 'register'
-      ? `Your ${campusName} verification code is: ${otp}. Valid for 10 minutes. Do not disclose this code to anyone.`
+    purpose === 'register' || purpose === 'phone_verification'
+      ? `Your ${campusName} verification code is: ${otp}. Valid for 10 minutes. Do not share this code with anyone.`
       : `Your ${campusName} login code is: ${otp}. Use this to securely access your student account. Valid for 10 minutes.`;
 
-  // 1. Check for live SMS Gateway Keys (mNotify, Arkesel, Hubtel)
-  const mNotifyKey = process.env.MNOTIFY_API_KEY;
-  const arkeselKey = process.env.ARKESEL_API_KEY;
+  const mNotifyKey = process.env.MNOTIFY_API_KEY?.trim();
 
+  // 1. Production / Live Dispatch via BMS Africa (mNotify)
   if (mNotifyKey) {
     try {
-      await sendViaMNotify(mNotifyKey, formattedPhone, message);
+      const bmsResult = await sendViaMNotify(mNotifyKey, formattedPhone, message);
       return {
         success: true,
         phone: formattedPhone,
-        otp,
         message,
         simulated: false,
-        provider: 'mNotify',
+        provider: 'BMS Africa (mNotify)',
+        campaignId: bmsResult.summary?._id,
       };
     } catch (err: any) {
-      console.warn('⚠️ mNotify dispatch failed, falling back to simulated log:', err.message);
+      console.error('⚠️ BMS Africa dispatch failure:', err.message);
+      // Strict rule: Fail closed. Do not silently fall back to other providers or simulator
+      throw new Error(
+        'Failed to dispatch SMS verification code through telecom provider. Please verify your phone number and try again.'
+      );
     }
   }
 
-  if (arkeselKey) {
-    try {
-      await sendViaArkesel(arkeselKey, formattedPhone, message);
-      return {
-        success: true,
-        phone: formattedPhone,
-        otp,
-        message,
-        simulated: false,
-        provider: 'Arkesel',
-      };
-    } catch (err: any) {
-      console.warn('⚠️ Arkesel dispatch failed, falling back to simulated log:', err.message);
-    }
+  // 2. Production Protection: Refuse mock SMS in production
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL SECURITY ERROR: MNOTIFY_API_KEY is not configured on this production server.');
   }
 
-  // 2. High-Fidelity Development / Simulated Dispatch
-  // Displays instant OTP receipt in terminal so local testing requires zero external costs
-  console.log('\n============================================================');
-  console.log('📱 [GHANA TELECOM SMS GATEWAY - SIMULATED DISPATCH]');
-  console.log(`📡 Recipient (Ghana SIM): ${formattedPhone}`);
-  console.log(`🏢 Sender ID:            CampusHustle`);
-  console.log(`🎯 Purpose:              ${purpose.toUpperCase()} VERIFICATION`);
-  console.log(`🔑 6-Digit OTP Code:     >>> ${otp} <<<`);
-  console.log(`✉️ SMS Body:             "${message}"`);
-  console.log(`⏱️ Expiry:               10 Minutes`);
-  console.log('✅ Status:               DISPATCHED SUCCESSFULLY (Dev Mode)');
-  console.log('============================================================\n');
+  // 3. Gated Development Simulator
+  const isDevOtpMode = process.env.DEV_OTP_MODE === 'true';
+  const allowMockSms = process.env.ALLOW_MOCK_SMS === 'true';
 
-  return {
-    success: true,
-    phone: formattedPhone,
-    otp,
-    message,
-    simulated: true,
-    provider: 'Simulated Gateway',
-  };
+  if (allowMockSms || isDevOtpMode) {
+    const displayOtp = isDevOtpMode ? otp : '******';
+    console.log('\n============================================================');
+    console.log('📱 [GHANA TELECOM SMS GATEWAY - DEV SIMULATOR]');
+    console.log(`📡 Recipient (Ghana SIM): ${maskPhoneNumber(formattedPhone)}`);
+    console.log(`🏢 Sender ID:            ${process.env.BMS_SENDER_ID || 'CampHustle'}`);
+    console.log(`🎯 Purpose:              ${purpose.toUpperCase()}`);
+    console.log(`🔑 6-Digit OTP Code:     >>> ${displayOtp} <<<`);
+    console.log(`⏱️ Expiry:               10 Minutes`);
+    console.log('✅ Status:               DISPATCHED (Local Dev Mode)');
+    console.log('============================================================\n');
+
+    return {
+      success: true,
+      phone: formattedPhone,
+      message,
+      simulated: true,
+      provider: 'Dev Simulator',
+    };
+  }
+
+  throw new Error('SMS service is unavailable. Please configure MNOTIFY_API_KEY in environment variables.');
 }
 
-// mNotify Ghana SMS integration helper
-function sendViaMNotify(apiKey: string, toPhone: string, message: string): Promise<any> {
+/**
+ * BMS Africa / mNotify Official API Integration
+ * Endpoint: POST https://api.mnotify.com/api/sms/quick?key=YOUR_API_KEY
+ * Payload includes documented: sms_type: "otp"
+ */
+export function sendViaMNotify(apiKey: string, toPhone: string, message: string): Promise<any> {
   return new Promise((resolve, reject) => {
+    const senderId = (process.env.BMS_SENDER_ID || 'CampHustle').trim().slice(0, 11);
+    const recipientFormatted = formatForBmsRecipient(toPhone);
+
     const postData = JSON.stringify({
-      recipient: [toPhone.replace('+', '')],
-      sender: 'CampHustle',
+      recipient: [recipientFormatted],
+      sender: senderId,
       message,
       is_schedule: false,
-      schedule_date: '',
+      sms_type: 'otp', // Documented BMS OTP activation flag
     });
 
     const options = {
       hostname: 'api.mnotify.com',
       port: 443,
-      path: `/api/sms/quick?key=${apiKey}`,
+      path: `/api/sms/quick?key=${encodeURIComponent(apiKey)}`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(postData),
+        Accept: 'application/json',
       },
+      timeout: 12000, // 12 seconds timeout
     };
 
     const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => resolve(JSON.parse(data || '{}')));
+      let rawData = '';
+      res.setEncoding('utf8');
+
+      res.on('data', (chunk) => {
+        rawData += chunk;
+      });
+
+      res.on('end', () => {
+        let parsed: any;
+        try {
+          parsed = JSON.parse(rawData || '{}');
+        } catch (parseErr) {
+          return reject(
+            new Error(
+              `BMS gateway returned malformed response (HTTP ${res.statusCode}): ${rawData.slice(0, 100)}`
+            )
+          );
+        }
+
+        // 1. Validate HTTP Status
+        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+          const errMsg = parsed.message || parsed.error || `HTTP ${res.statusCode}`;
+          return reject(new Error(`BMS gateway error: ${errMsg}`));
+        }
+
+        // 2. Validate Documented BMS Status & Code
+        // Official BMS success signature: status: "success", code: "2000"
+        if (parsed.status !== 'success' || parsed.code !== '2000') {
+          const errMsg = parsed.message || `BMS rejection code ${parsed.code || 'UNKNOWN'}`;
+          return reject(new Error(`BMS provider rejected SMS: ${errMsg}`));
+        }
+
+        // 3. Validate Summary Rejections if available
+        if (parsed.summary && typeof parsed.summary.total_rejected === 'number' && parsed.summary.total_rejected > 0) {
+          return reject(
+            new Error(`BMS rejected delivery to recipient: ${parsed.message || 'Number rejected'}`)
+          );
+        }
+
+        resolve(parsed);
+      });
     });
 
-    req.on('error', (e) => reject(e));
-    req.write(postData);
-    req.end();
-  });
-}
-
-// Arkesel Ghana SMS integration helper
-function sendViaArkesel(apiKey: string, toPhone: string, message: string): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({
-      sender: 'CampHustle',
-      message,
-      recipients: [toPhone.replace('+', '')],
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('BMS gateway connection timed out after 12000ms.'));
     });
 
-    const options = {
-      hostname: 'sms.arkesel.com',
-      port: 443,
-      path: '/api/v2/sms/send',
-      method: 'POST',
-      headers: {
-        'api-key': apiKey,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => resolve(JSON.parse(data || '{}')));
+    req.on('error', (e) => {
+      reject(new Error(`Network error contacting BMS gateway: ${e.message}`));
     });
 
-    req.on('error', (e) => reject(e));
     req.write(postData);
     req.end();
   });
