@@ -162,6 +162,7 @@ export const initializePayment = async (req: Request, res: Response) => {
             reference,
             currency: 'GHS',
             channels: ['mobile_money', 'card'],
+            callback_url: process.env.FRONTEND_URL || 'https://campushustle-mobile.vercel.app',
             metadata: {
               orderId: order.id,
               hustleId: hustle.id,
