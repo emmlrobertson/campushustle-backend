@@ -95,6 +95,33 @@ function assertProductionSecurityConfig() {
   }
 }
 
+async function ensureSchemaSync() {
+  try {
+    console.log('🔄 Verifying and syncing database schema columns...');
+    const statements = [
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "idempotencyKey" TEXT;`,
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "campusCode" TEXT;`,
+      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "contactPhone" TEXT;`,
+      `ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "idempotencyKey" TEXT;`,
+      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "deliveryAddress" TEXT;`,
+      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "notesToSeller" TEXT;`,
+      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "acceptedAt" TIMESTAMP(3);`,
+      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "deliveredAt" TIMESTAMP(3);`,
+      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "completedAt" TIMESTAMP(3);`,
+      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "cancelledAt" TIMESTAMP(3);`,
+      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "cancellationReason" TEXT;`,
+      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "cancelledByUserId" TEXT;`,
+    ];
+
+    for (const sql of statements) {
+      await prisma.$executeRawUnsafe(sql);
+    }
+    console.log('✅ Database schema columns verified and synchronized!');
+  } catch (err: any) {
+    console.warn('⚠️ Schema sync notice (non-fatal):', err.message);
+  }
+}
+
 // Start Server & Initialize Database
 async function startServer() {
   try {
@@ -103,6 +130,9 @@ async function startServer() {
     // 1. Connect to PostgreSQL via Prisma
     await prisma.$connect();
     console.log('🐘 PostgreSQL Database Connected via Prisma!');
+
+    // 2. Synchronize any missing schema columns
+    await ensureSchemaSync();
 
     const server = app.listen(PORT, () => {
       console.log(`\n==================================================`);

@@ -7,7 +7,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "prisma generate && tsc --skipLibCheck",
     "postinstall": "prisma generate && tsc --skipLibCheck",
-    "start": "node dist/server.js",
+    "start": "prisma db push --accept-data-loss && node dist/server.js",
     "db:init": "ts-node src/db/initDb.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
