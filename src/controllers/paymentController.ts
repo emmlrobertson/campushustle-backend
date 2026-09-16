@@ -77,12 +77,19 @@ export const initializePayment = async (req: Request, res: Response) => {
     }
 
     // 3. Prevent self-purchase
-    if (hustle.sellerProfile.userId === buyer.id) {
+    if (hustle.sellerProfile && hustle.sellerProfile.userId === buyer.id) {
       return res.status(400).json({
         success: false,
         error: 'You cannot purchase your own hustle listing.',
       });
     }
+
+    const cleanMomoNumber = String(momoNumber || '').trim();
+    const cleanMeetupSpot = String(meetupSpot || 'Campus Spot').trim();
+    const sellerName =
+      hustle.sellerProfile?.businessName ||
+      hustle.sellerProfile?.user?.name ||
+      'Campus Hustle Seller';
 
     const uniCode = buyer.university?.code || 'KNUST';
     const orderNumber = `CH-${uniCode}-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -108,7 +115,7 @@ export const initializePayment = async (req: Request, res: Response) => {
           orderId: newOrder.id,
           sellerProfileId: hustle.sellerProfileId,
           subtotal: hustle.price,
-          meetupLocation: meetupSpot.trim(),
+          meetupLocation: cleanMeetupSpot,
           status: SubOrderStatus.PENDING_ACCEPTANCE,
           escrowStatus: EscrowStatus.HELD,
           items: {
@@ -130,7 +137,7 @@ export const initializePayment = async (req: Request, res: Response) => {
           amount: hustle.price,
           currency: 'GHS',
           paymentMethod: methodEnum,
-          momoNumber: momoNumber.trim(),
+          momoNumber: cleanMomoNumber,
           status: PaymentStatus.INITIALIZED,
         },
       });
@@ -158,9 +165,9 @@ export const initializePayment = async (req: Request, res: Response) => {
             metadata: {
               orderId: order.id,
               hustleId: hustle.id,
-              sellerName: hustle.sellerProfile.user.name,
-              momoNumber,
-              meetupSpot,
+              sellerName,
+              momoNumber: cleanMomoNumber,
+              meetupSpot: cleanMeetupSpot,
             },
           }),
         });
@@ -182,18 +189,21 @@ export const initializePayment = async (req: Request, res: Response) => {
         orderNumber: order.orderNumber,
         amount: Number(hustle.price),
         currency: 'GHS',
-        recipientSeller: hustle.sellerProfile.user.name,
+        recipientSeller: sellerName,
         momoNumber: payment.momoNumber,
         provider: methodEnum,
         authorizationUrl,
         escrowStatus: 'HELD',
-        meetupSpot,
-        instructions: `A Mobile Money prompt of GH₵ ${Number(hustle.price).toFixed(2)} has been initiated for ${momoNumber}. Your funds remain safely held in Campus Escrow until service is delivered at ${meetupSpot}.`,
+        meetupSpot: cleanMeetupSpot,
+        instructions: `A Mobile Money prompt of GH₵ ${Number(hustle.price).toFixed(2)} has been initiated for ${cleanMomoNumber}. Your funds remain safely held in Campus Escrow until service is delivered at ${cleanMeetupSpot}.`,
       },
     });
   } catch (error: any) {
     console.error('initializePayment error:', error);
-    res.status(500).json({ success: false, error: 'Internal server error initializing payment.' });
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Internal server error initializing payment.',
+    });
   }
 };
 
