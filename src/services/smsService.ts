@@ -105,10 +105,17 @@ export async function sendSmsOtp(params: {
       };
     } catch (err: any) {
       console.error('⚠️ BMS Africa dispatch failure:', err.message);
-      // Strict rule: Fail closed. Do not silently fall back to other providers or simulator
-      throw new Error(
-        'Failed to dispatch SMS verification code through telecom provider. Please verify your phone number and try again.'
-      );
+      const isDevMode = process.env.NODE_ENV !== 'production';
+      const allowDevFallback = process.env.ALLOW_MOCK_SMS === 'true' || process.env.DEV_OTP_MODE === 'true';
+
+      if (isDevMode && allowDevFallback) {
+        console.warn('⚠️ Telecom provider rejected SMS (likely unapproved Sender ID). Falling back to Dev Simulator for local testing.');
+      } else {
+        // Strict rule for production: Fail closed with specific provider reason
+        throw new Error(
+          `Telecom provider error: ${err.message || 'Failed to dispatch SMS verification code'}`
+        );
+      }
     }
   }
 
