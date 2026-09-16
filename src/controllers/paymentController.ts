@@ -4,7 +4,7 @@ import { prisma } from '../db/prisma';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { PaymentMethod, PaymentStatus, EscrowStatus, OrderStatus, SubOrderStatus } from '@prisma/client';
 
-const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || '';
+const getPaystackSecretKey = () => (process.env.PAYSTACK_SECRET_KEY || '').trim();
 
 function parsePaymentMethod(method?: string): PaymentMethod {
   if (!method) return PaymentMethod.MTN_MOMO;
@@ -140,13 +140,13 @@ export const initializePayment = async (req: Request, res: Response) => {
 
     let authorizationUrl = `https://checkout.paystack.com/simulate_${reference}`;
 
-    // 5. Connect to Paystack if Secret Key configured
-    if (PAYSTACK_SECRET_KEY) {
+    const paystackSecretKey = getPaystackSecretKey();
+    if (paystackSecretKey) {
       try {
         const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+            Authorization: `Bearer ${paystackSecretKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -248,11 +248,11 @@ export const verifyPayment = async (req: Request, res: Response) => {
 
     let isSuccess = false;
 
-    // Verify with Paystack API if configured
-    if (PAYSTACK_SECRET_KEY) {
+    const paystackSecretKey = getPaystackSecretKey();
+    if (paystackSecretKey) {
       try {
         const paystackRes = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-          headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` },
+          headers: { Authorization: `Bearer ${paystackSecretKey}` },
         });
         const paystackData = (await paystackRes.json()) as any;
         if (paystackData.data?.status === 'success') {
@@ -498,7 +498,7 @@ export const getTransactionHistory = async (req: Request, res: Response) => {
 export const handlePaystackWebhook = async (req: Request, res: Response) => {
   try {
     const signature = req.headers['x-paystack-signature'] as string;
-    const secret = process.env.PAYSTACK_SECRET_KEY || '';
+    const secret = getPaystackSecretKey();
 
     if (!signature || !secret) {
       return res.status(400).json({ success: false, error: 'Webhook signature or secret missing' });
