@@ -36,6 +36,7 @@ export const registerRateLimiter = rateLimit({
 export const otpRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // Max 10 attempts per 15 minutes
+  validate: { keyGeneratorIpFallback: false },
   keyGenerator: (req) => {
     const bodyIdentifier = req.body?.email || req.body?.phone || req.body?.whatsAppNumber || '';
     const cleanId = typeof bodyIdentifier === 'string' ? bodyIdentifier.trim().toLowerCase() : '';
