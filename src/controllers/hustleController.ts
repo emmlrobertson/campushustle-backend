@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { prisma } from '../db/prisma';
-import { getDatabase } from '../db/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import {
   createHustleSchema,
@@ -9,7 +8,7 @@ import {
   createReviewSchema,
   hustleQuerySchema,
 } from '../validators/hustleValidators';
-import { HustleStatus, PriceType, DeliveryMode } from '@prisma/client';
+import { HustleStatus, PriceType, DeliveryMode, SubOrderStatus } from '@prisma/client';
 import { storageService } from '../services/storageService';
 
 // ============================================================================
@@ -467,37 +466,6 @@ export const createHustle = async (req: Request, res: Response) => {
       },
     });
 
-    // 7. Backward Compatibility: sync to SQLite if present
-    try {
-      const db = await getDatabase();
-      await db.run(
-        `INSERT INTO hustles 
-        (id, title, description, price, price_type, category, hostel_location, seller_id, seller_name, seller_program, whats_app_number, campus_id, rating, review_count, image_url, tags, is_featured, created_at, delivery_mode, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 5.0, 0, ?, ?, 0, ?, ?, ?)`,
-        [
-          id,
-          title,
-          description,
-          price,
-          priceType || 'flat',
-          category,
-          createdHustle.hostelLocation,
-          user.id,
-          user.name,
-          user.program,
-          contactPhone,
-          user.university.code.toLowerCase(),
-          imageList[0],
-          tagsArray.join(','),
-          createdHustle.createdAt.toISOString(),
-          deliveryMode || 'to_client',
-          status === 'BUSY' ? 'BUSY' : 'OPEN',
-        ]
-      );
-    } catch (sqliteErr) {
-      // Non-blocking if SQLite table has differing schema
-    }
-
     res.status(201).json({
       success: true,
       message: 'Hustle created successfully!',
@@ -603,23 +571,6 @@ export const updateHustle = async (req: Request, res: Response) => {
       },
     });
 
-    // 3. Sync update to SQLite for compatibility
-    try {
-      const db = await getDatabase();
-      const sqliteStatus = updated.status === 'BUSY' ? 'BUSY' : 'OPEN';
-      await db.run(
-        `UPDATE hustles SET 
-          title = COALESCE(?, title),
-          description = COALESCE(?, description),
-          price = COALESCE(?, price),
-          hostel_location = COALESCE(?, hostel_location),
-          whats_app_number = COALESCE(?, whats_app_number),
-          status = ?
-        WHERE id = ?`,
-        [val.title, val.description, val.price, val.hostelLocation, val.whatsAppNumber, sqliteStatus, id]
-      );
-    } catch (e) {}
-
     res.json({
       success: true,
       message: 'Hustle updated successfully',
@@ -674,12 +625,6 @@ export const deleteHustle = async (req: Request, res: Response) => {
     // Delete in PostgreSQL
     await prisma.hustle.delete({ where: { id } });
 
-    // Sync delete to SQLite
-    try {
-      const db = await getDatabase();
-      await db.run('DELETE FROM hustles WHERE id = ?', [id]);
-    } catch (e) {}
-
     res.json({ success: true, message: 'Hustle deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -725,12 +670,6 @@ export const toggleHustleStatus = async (req: Request, res: Response) => {
 
     const frontendStatus = updated.status === 'BUSY' ? 'BUSY' : 'OPEN';
 
-    // Sync to SQLite
-    try {
-      const db = await getDatabase();
-      await db.run('UPDATE hustles SET status = ? WHERE id = ?', [frontendStatus, id]);
-    } catch (e) {}
-
     res.json({
       success: true,
       message: `Status updated to ${frontendStatus}`,
@@ -769,6 +708,8 @@ export const getHustleReviews = async (req: Request, res: Response) => {
         reviewerProgram: r.reviewer?.program || 'Student',
         rating: r.rating,
         comment: r.comment,
+        isVerifiedPurchase: Boolean(r.orderItemId),
+        orderItemId: r.orderItemId,
         createdAt: r.createdAt.toISOString(),
       })),
     });
@@ -819,7 +760,26 @@ export const createHustleReview = async (req: Request, res: Response) => {
       });
     }
 
-    // 3. Atomically create review and calculate new rating average
+    // 3. Verified Purchase Rule: Require a completed OrderItem for this hustle
+    const completedOrderItem = await prisma.orderItem.findFirst({
+      where: {
+        hustleId: id,
+        subOrder: {
+          order: { buyerId: reviewerId },
+          status: { in: [SubOrderStatus.COMPLETED, SubOrderStatus.DELIVERED] },
+        },
+        review: null,
+      },
+    });
+
+    if (!completedOrderItem) {
+      return res.status(403).json({
+        success: false,
+        error: 'Only verified student buyers who have completed an order for this hustle can submit a review.',
+      });
+    }
+
+    // 4. Atomically create review with orderItemId link and calculate new rating average
     const reviewer = await prisma.user.findUnique({ where: { id: reviewerId } });
 
     const result = await prisma.$transaction(async (tx) => {
@@ -827,6 +787,7 @@ export const createHustleReview = async (req: Request, res: Response) => {
         data: {
           hustleId: id,
           reviewerId,
+          orderItemId: completedOrderItem.id,
           rating,
           comment,
         },
@@ -852,32 +813,9 @@ export const createHustleReview = async (req: Request, res: Response) => {
       return { review, calculatedRating, reviewCount };
     });
 
-    // 4. Sync to SQLite for backward compatibility
-    try {
-      const db = await getDatabase();
-      await db.run(
-        `INSERT INTO reviews (id, hustle_id, reviewer_id, reviewer_name, reviewer_program, rating, comment, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          result.review.id,
-          id,
-          reviewerId,
-          reviewer?.name || 'Verified Student',
-          reviewer?.program || 'Student',
-          rating,
-          comment,
-          result.review.createdAt.toISOString(),
-        ]
-      );
-      await db.run(
-        'UPDATE hustles SET rating = ?, review_count = ? WHERE id = ?',
-        [result.calculatedRating, result.reviewCount, id]
-      );
-    } catch (e) {}
-
     res.status(201).json({
       success: true,
-      message: 'Review posted successfully!',
+      message: 'Verified review posted successfully!',
       data: {
         id: result.review.id,
         hustleId: id,
@@ -885,6 +823,8 @@ export const createHustleReview = async (req: Request, res: Response) => {
         reviewerProgram: reviewer?.program || 'Student',
         rating,
         comment,
+        isVerifiedPurchase: true,
+        orderItemId: completedOrderItem.id,
         createdAt: result.review.createdAt.toISOString(),
       },
       updatedHustle: {
@@ -995,6 +935,105 @@ export const uploadHustleImagesForListingHandler = async (req: Request, res: Res
   } catch (error: any) {
     console.error('Hustle Image Upload Error:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to upload image' });
+  }
+};
+
+// ============================================================================
+// 12. FAVORITES: TOGGLE FAVORITE (PostgreSQL Source of Truth)
+// ============================================================================
+export const toggleFavoriteHustle = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Authentication required to favorite listings.' });
+    }
+
+    const hustle = await prisma.hustle.findUnique({ where: { id } });
+    if (!hustle) {
+      return res.status(404).json({ success: false, error: 'Hustle not found.' });
+    }
+
+    const existing = await prisma.favorite.findUnique({
+      where: {
+        userId_hustleId: {
+          userId,
+          hustleId: id,
+        },
+      },
+    });
+
+    if (existing) {
+      await prisma.favorite.delete({
+        where: { id: existing.id },
+      });
+      return res.json({
+        success: true,
+        isFavorite: false,
+        message: 'Removed from saved hustles.',
+      });
+    } else {
+      await prisma.favorite.create({
+        data: {
+          userId,
+          hustleId: id,
+        },
+      });
+      return res.json({
+        success: true,
+        isFavorite: true,
+        message: 'Saved to your favorites!',
+      });
+    }
+  } catch (error: any) {
+    console.error('Toggle favorite error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to update favorite.' });
+  }
+};
+
+// ============================================================================
+// 13. FAVORITES: GET MY FAVORITES
+// ============================================================================
+export const getMyFavoriteHustles = async (req: Request, res: Response) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Authentication required to view favorites.' });
+    }
+
+    const favorites = await prisma.favorite.findMany({
+      where: { userId },
+      include: {
+        hustle: {
+          include: {
+            university: true,
+            category: true,
+            sellerProfile: { include: { user: true } },
+            images: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const favoriteIds = favorites.map((f) => f.hustleId);
+    const favoriteHustles = favorites
+      .filter((f) => f.hustle !== null)
+      .map((f) => formatHustleResponse(f.hustle));
+
+    res.json({
+      success: true,
+      count: favorites.length,
+      favoriteIds,
+      data: favoriteHustles,
+    });
+  } catch (error: any) {
+    console.error('Get my favorites error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch favorites.' });
   }
 };
 

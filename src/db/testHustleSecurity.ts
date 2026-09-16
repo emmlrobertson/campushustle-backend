@@ -287,25 +287,94 @@ async function runHustleSecurityTests() {
     await createHustleReview(reqSelf, resSelf);
     assert(getStatusSelf() === 400, 'Seller A blocked from reviewing own hustle (returns 400 Bad Request)');
 
-    // B: Buyer C leaves a 4-star review
+    // B: Buyer C attempts to review without a completed order (Must be rejected with 403)
+    const { req: reqUnverified, res: resUnverified, getStatus: getStatusUnverified } = createMockReqRes({
+      params: { id: createdHustleId },
+      body: { rating: 5, comment: 'Nice!' },
+      user: { id: buyerC.id, email: buyerC.email },
+    });
+    await createHustleReview(reqUnverified, resUnverified);
+    assert(getStatusUnverified() === 403, 'Buyer without completed order blocked from reviewing (returns 403 Forbidden)');
+
+    // Create completed SubOrders + OrderItems for Buyer C & Buyer D to grant verified review capability
+    const createdHustleRecord = await prisma.hustle.findUnique({
+      where: { id: createdHustleId },
+    });
+    const sellerProfileId = createdHustleRecord!.sellerProfileId;
+
+    const orderC = await prisma.order.create({
+      data: {
+        orderNumber: `CH-KNUST-TEST-${Date.now()}-C`,
+        buyerId: buyerC.id,
+        totalAmount: 150,
+        status: 'COMPLETED',
+        subOrders: {
+          create: {
+            subOrderNumber: `CH-KNUST-TEST-${Date.now()}-C1`,
+            sellerProfileId,
+            subtotal: 150,
+            meetupLocation: 'CCB Ground Floor',
+            status: 'COMPLETED',
+            items: {
+              create: {
+                hustleId: createdHustleId,
+                snapshotTitle: 'iPhone Screen Replacement',
+                snapshotPrice: 150,
+                quantity: 1,
+                lineTotal: 150,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const orderD = await prisma.order.create({
+      data: {
+        orderNumber: `CH-KNUST-TEST-${Date.now()}-D`,
+        buyerId: buyerD.id,
+        totalAmount: 150,
+        status: 'COMPLETED',
+        subOrders: {
+          create: {
+            subOrderNumber: `CH-KNUST-TEST-${Date.now()}-D1`,
+            sellerProfileId,
+            subtotal: 150,
+            meetupLocation: 'CCB Ground Floor',
+            status: 'COMPLETED',
+            items: {
+              create: {
+                hustleId: createdHustleId,
+                snapshotTitle: 'iPhone Screen Replacement',
+                snapshotPrice: 150,
+                quantity: 1,
+                lineTotal: 150,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // C: Buyer C leaves a verified 4-star review
     const { req: reqBuyerC, res: resBuyerC, getStatus: getStatusBuyerC } = createMockReqRes({
       params: { id: createdHustleId },
       body: { rating: 4, comment: 'Great repair service, screen looks brand new.' },
       user: { id: buyerC.id, email: buyerC.email },
     });
     await createHustleReview(reqBuyerC, resBuyerC);
-    assert(getStatusBuyerC() === 201, 'Buyer C posts 4-star review successfully');
+    assert(getStatusBuyerC() === 201, 'Verified Buyer C posts 4-star review successfully');
 
-    // C: Buyer D leaves a 2-star review
+    // D: Buyer D leaves a verified 2-star review
     const { req: reqBuyerD, res: resBuyerD, getStatus: getStatusBuyerD } = createMockReqRes({
       params: { id: createdHustleId },
       body: { rating: 2, comment: 'Took longer than expected to finish.' },
       user: { id: buyerD.id, email: buyerD.email },
     });
     await createHustleReview(reqBuyerD, resBuyerD);
-    assert(getStatusBuyerD() === 201, 'Buyer D posts 2-star review successfully');
+    assert(getStatusBuyerD() === 201, 'Verified Buyer D posts 2-star review successfully');
 
-    // D: Verify Hustle rating recalculated dynamically: (4 + 2) / 2 = 3.0, count = 2
+    // E: Verify Hustle rating recalculated dynamically: (4 + 2) / 2 = 3.0, count = 2
     const { req: reqFetch, res: resFetch, getData: getDataFetch } = createMockReqRes({
       params: { id: createdHustleId },
     });

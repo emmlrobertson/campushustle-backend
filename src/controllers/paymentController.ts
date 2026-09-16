@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import { prisma } from '../db/prisma';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { PaymentMethod, PaymentStatus, EscrowStatus, OrderStatus, SubOrderStatus } from '@prisma/client';
@@ -439,19 +440,39 @@ export const getTransactionHistory = async (req: Request, res: Response) => {
       const primarySubOrder = order.subOrders[0];
       const primaryItem = primarySubOrder?.items[0];
 
+      const sellerName =
+        primarySubOrder?.sellerProfile?.businessName ||
+        primarySubOrder?.sellerProfile?.user?.name ||
+        'Student Hustler';
+      const escrowStatus = primarySubOrder?.escrowStatus || 'HELD';
+      const meetupSpot = primarySubOrder?.meetupLocation || 'Campus Spot';
+      const createdAt = order.createdAt instanceof Date ? order.createdAt.toISOString() : order.createdAt;
+
       return {
         id: order.id,
         orderNumber: order.orderNumber,
+        order_number: order.orderNumber,
         reference: primaryPayment?.reference || 'N/A',
         hustleTitle: primaryItem?.snapshotTitle || 'Campus Hustle Service',
-        sellerName: primarySubOrder?.sellerProfile.user.name || 'Student Hustler',
+        hustle_title: primaryItem?.snapshotTitle || 'Campus Hustle Service',
+        sellerName,
+        seller_name: sellerName,
         amount: Number(order.totalAmount),
         currency: order.currency,
         status: order.status,
         paymentStatus: primaryPayment?.status || 'PENDING',
-        escrowStatus: primarySubOrder?.escrowStatus || 'HELD',
-        meetupSpot: primarySubOrder?.meetupLocation || 'Campus Spot',
-        createdAt: order.createdAt,
+        payment_status: primaryPayment?.status || 'PENDING',
+        escrowStatus,
+        escrow_status:
+          escrowStatus === 'RELEASED_TO_SELLER'
+            ? 'released'
+            : escrowStatus === 'REFUNDED_TO_BUYER'
+            ? 'refunded'
+            : 'held',
+        meetupSpot,
+        meetup_spot: meetupSpot,
+        createdAt,
+        created_at: createdAt,
       };
     });
 
@@ -463,5 +484,93 @@ export const getTransactionHistory = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('getTransactionHistory error:', error);
     res.status(500).json({ success: false, error: 'Internal server error fetching history.' });
+  }
+};
+
+/**
+ * Paystack Webhook Handler (Asynchronous payment confirmation)
+ * POST /api/payments/webhook
+ * Requirements:
+ * - No JWT authentication
+ * - Verify x-paystack-signature using HMAC SHA512 of rawBody
+ * - Idempotently handle charge.success
+ */
+export const handlePaystackWebhook = async (req: Request, res: Response) => {
+  try {
+    const signature = req.headers['x-paystack-signature'] as string;
+    const secret = process.env.PAYSTACK_SECRET_KEY || '';
+
+    if (!signature || !secret) {
+      return res.status(400).json({ success: false, error: 'Webhook signature or secret missing' });
+    }
+
+    // Compute HMAC SHA512 on raw body buffer or JSON string
+    const rawBody = (req as any).rawBody || Buffer.from(JSON.stringify(req.body));
+    const expectedSignature = crypto
+      .createHmac('sha512', secret)
+      .update(rawBody)
+      .digest('hex');
+
+    if (signature !== expectedSignature) {
+      return res.status(401).json({ success: false, error: 'Invalid Paystack webhook signature' });
+    }
+
+    const event = req.body;
+
+    if (event.event === 'charge.success') {
+      const data = event.data;
+      const reference = data?.reference;
+
+      if (!reference) {
+        return res.status(400).json({ success: false, error: 'Missing reference in event data' });
+      }
+
+      // 1. Locate payment record
+      const payment = await prisma.payment.findUnique({
+        where: { reference },
+        include: { order: true },
+      });
+
+      if (!payment) {
+        console.warn(`Paystack webhook: transaction reference '${reference}' not found in database.`);
+        return res.status(200).json({ status: 'ignored', reason: 'Reference not found' });
+      }
+
+      // 2. Idempotency: if already marked SUCCESS, acknowledge immediately
+      if (payment.status === PaymentStatus.SUCCESS) {
+        return res.status(200).json({ status: 'already_processed' });
+      }
+
+      // 3. Atomically update payment, order, and sub-orders
+      await prisma.$transaction([
+        prisma.payment.update({
+          where: { reference },
+          data: {
+            status: PaymentStatus.SUCCESS,
+            paidAt: new Date(data.paid_at || Date.now()),
+            rawMetadata: data,
+          },
+        }),
+        prisma.order.update({
+          where: { id: payment.orderId },
+          data: { status: OrderStatus.PAID },
+        }),
+        prisma.subOrder.updateMany({
+          where: { orderId: payment.orderId },
+          data: {
+            status: SubOrderStatus.IN_PROGRESS,
+            escrowStatus: EscrowStatus.HELD,
+          },
+        }),
+      ]);
+
+      console.log(`✅ Paystack Webhook: Order '${payment.order.orderNumber}' marked PAID via reference '${reference}'`);
+    }
+
+    // Acknowledge receipt to Paystack
+    res.status(200).json({ status: 'success' });
+  } catch (error: any) {
+    console.error('Paystack webhook processing error:', error);
+    res.status(500).json({ success: false, error: 'Internal server error processing webhook' });
   }
 };

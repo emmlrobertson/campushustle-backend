@@ -40,6 +40,7 @@ export const authenticateToken = async (
       select: {
         id: true,
         email: true,
+        role: true,
         isActive: true,
         phoneVerified: true,
         tokenVersion: true,
@@ -72,7 +73,7 @@ export const authenticateToken = async (
       id: user.id,
       email: user.email,
       universityId: decoded.universityId,
-      role: decoded.role,
+      role: user.role,
       tokenVersion: user.tokenVersion,
     };
 
@@ -89,4 +90,34 @@ export const authenticateToken = async (
       error: 'Invalid Authorization token.',
     });
   }
+};
+
+/**
+ * Middleware: Require ADMIN role
+ */
+export const requireAdmin = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    return res.status(403).json({
+      success: false,
+      error: 'Access Denied: Administrator privileges required.',
+    });
+  }
+  next();
+};
+
+/**
+ * Middleware: Require ADMIN or MODERATOR role
+ */
+export const requireAdminOrModerator = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.user || (req.user.role !== 'ADMIN' && req.user.role !== 'MODERATOR')) {
+    return res.status(403).json({
+      success: false,
+      error: 'Access Denied: Moderator or Administrator privileges required.',
+    });
+  }
+  next();
 };

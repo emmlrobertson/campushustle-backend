@@ -5,7 +5,8 @@ import hustleRoutes from './routes/hustleRoutes';
 import authRoutes from './routes/authRoutes';
 import paymentRoutes from './routes/paymentRoutes';
 import orderRoutes from './routes/orderRoutes';
-import { initializeDatabase } from './db/initDb';
+import cartRoutes from './routes/cartRoutes';
+import adminRoutes from './routes/adminRoutes';
 import { prisma } from './db/prisma';
 
 dotenv.config();
@@ -20,7 +21,14 @@ import path from 'path';
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Parse JSON and preserve raw body for Paystack HMAC SHA512 signature verification
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 // Serve local upload assets (development & offline fallback)
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
@@ -30,6 +38,8 @@ app.use('/api/hustles', hustleRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/cart', cartRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health Check
 app.get('/api/health', async (req, res) => {
@@ -93,9 +103,6 @@ async function startServer() {
     // 1. Connect to PostgreSQL via Prisma
     await prisma.$connect();
     console.log('🐘 PostgreSQL Database Connected via Prisma!');
-
-    // 2. Fallback SQLite legacy support during transition
-    await initializeDatabase();
 
     const server = app.listen(PORT, () => {
       console.log(`\n==================================================`);

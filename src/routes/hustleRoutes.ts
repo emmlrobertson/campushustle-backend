@@ -11,6 +11,8 @@ import {
   createHustleReview,
   uploadHustleImageHandler,
   uploadHustleImagesForListingHandler,
+  toggleFavoriteHustle,
+  getMyFavoriteHustles,
 } from '../controllers/hustleController';
 import { authenticateToken } from '../middleware/authMiddleware';
 import {
@@ -23,11 +25,13 @@ const router = Router();
 
 // Protected routes (requires valid verified student JWT token)
 router.get('/my/listings', authenticateToken, getMyHustles);
+router.get('/my/favorites', authenticateToken, getMyFavoriteHustles);
 router.post('/', authenticateToken, createHustle);
 router.put('/:id', authenticateToken, updateHustle);
 router.patch('/:id', authenticateToken, updateHustle);
 router.delete('/:id', authenticateToken, deleteHustle);
 router.patch('/:id/status', authenticateToken, toggleHustleStatus);
+router.post('/:id/favorite', authenticateToken, toggleFavoriteHustle);
 router.post('/:id/reviews', authenticateToken, createHustleReview);
 
 // Image upload routes
