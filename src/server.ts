@@ -1,6 +1,8 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import hustleRoutes from './routes/hustleRoutes';
 import authRoutes from './routes/authRoutes';
 import paymentRoutes from './routes/paymentRoutes';
@@ -8,8 +10,6 @@ import orderRoutes from './routes/orderRoutes';
 import cartRoutes from './routes/cartRoutes';
 import adminRoutes from './routes/adminRoutes';
 import { prisma } from './db/prisma';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;

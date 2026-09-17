@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import { v2 as cloudinary } from 'cloudinary';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -134,9 +136,9 @@ class StorageService {
   public readonly isCloudinary: boolean;
 
   constructor() {
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    const apiKey = process.env.CLOUDINARY_API_KEY;
-    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME || 'doxkrnkkz';
+    const apiKey = process.env.CLOUDINARY_API_KEY || '686757399225734';
+    const apiSecret = process.env.CLOUDINARY_API_SECRET || 'my0nWTzwZqBASS5J0QuR9K_Mlss';
 
     if (cloudName && apiKey && apiSecret) {
       this.provider = new CloudinaryStorageProvider(cloudName, apiKey, apiSecret);

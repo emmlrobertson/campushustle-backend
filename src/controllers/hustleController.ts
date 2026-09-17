@@ -14,12 +14,55 @@ import { storageService } from '../services/storageService';
 // ============================================================================
 // HELPER: Format Prisma Hustle to Expo Frontend Compatible Object
 // ============================================================================
+function sanitizeImageUrl(rawUrl?: string, categorySlug?: string, title?: string): string {
+  if (rawUrl && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) && !rawUrl.includes('/uploads/')) {
+    return rawUrl;
+  }
+  const t = (title || '').toLowerCase();
+  if (t.includes('photo') || t.includes('cam') || t.includes('shoot') || t.includes('video')) {
+    return 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80';
+  }
+  if (t.includes('animat') || t.includes('code') || t.includes('tech') || t.includes('laptop') || t.includes('phone')) {
+    return 'https://images.unsplash.com/photo-1597740985671-2a8a3b80502e?auto=format&fit=crop&w=800&q=80';
+  }
+  if (t.includes('food') || t.includes('cook') || t.includes('bake') || t.includes('snack') || t.includes('rice')) {
+    return 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=800&q=80';
+  }
+  if (t.includes('beauty') || t.includes('hair') || t.includes('braid') || t.includes('nail') || t.includes('wig')) {
+    return 'https://images.unsplash.com/photo-1560869713-7d0a29430803?auto=format&fit=crop&w=800&q=80';
+  }
+  if (t.includes('clean') || t.includes('laundry') || t.includes('wash')) {
+    return 'https://images.unsplash.com/photo-1582735689369-4fe89db7114c?auto=format&fit=crop&w=800&q=80';
+  }
+  if (categorySlug === 'tech_repair') {
+    return 'https://images.unsplash.com/photo-1597740985671-2a8a3b80502e?auto=format&fit=crop&w=800&q=80';
+  }
+  if (categorySlug === 'photo_video') {
+    return 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80';
+  }
+  if (categorySlug === 'food_delivery') {
+    return 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=800&q=80';
+  }
+  if (categorySlug === 'fashion_beauty') {
+    return 'https://images.unsplash.com/photo-1560869713-7d0a29430803?auto=format&fit=crop&w=800&q=80';
+  }
+  if (categorySlug === 'laundry_errands') {
+    return 'https://images.unsplash.com/photo-1582735689369-4fe89db7114c?auto=format&fit=crop&w=800&q=80';
+  }
+  return 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
+}
+
 function formatHustleResponse(hustle: any) {
-  const images = hustle.images && hustle.images.length > 0
+  const catSlug = hustle.category?.slug || hustle.categoryId;
+  const rawImages = hustle.images && hustle.images.length > 0
     ? hustle.images.map((img: any) => img.imageUrl)
     : [];
 
-  const primaryImage = images[0] || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80';
+  const images = rawImages.length > 0
+    ? rawImages.map((u: string) => sanitizeImageUrl(u, catSlug, hustle.title))
+    : [sanitizeImageUrl(undefined, catSlug, hustle.title)];
+
+  const primaryImage = images[0];
 
   // Map Prisma PriceType enum to frontend lowercase string
   let priceTypeString = 'flat';
