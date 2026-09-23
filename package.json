@@ -7,18 +7,19 @@
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "prisma generate && tsc --skipLibCheck",
     "postinstall": "prisma generate && tsc --skipLibCheck",
-    "start": "prisma db push --accept-data-loss && node dist/server.js",
-    "db:init": "ts-node src/db/initDb.ts",
+    "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node src/db/seed.ts",
     "prisma:studio": "prisma studio",
-    "db:migrate-sqlite": "ts-node src/db/migrateSqliteToPostgres.ts",
     "db:verify": "ts-node src/db/verifyDb.ts",
     "test:auth": "ts-node src/db/testAuthFlow.ts",
     "test:hustle": "ts-node src/db/testHustleSecurity.ts",
     "test:upload": "ts-node src/db/testImageUploadSecurity.ts",
-    "test:orders": "ts-node src/db/testOrderArchitecture.ts"
+    "test:orders": "ts-node src/db/testOrderArchitecture.ts",
+    "test:financial:db": "ts-node src/db/testFinancialArchitectureDb.ts",
+    "test:seller:payout": "ts-node src/db/testSellerPayoutSecurity.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
@@ -31,8 +32,6 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.4.0",
     "prisma": "^6.4.1",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7",
     "typescript": "^5.3.3",
     "zod": "^4.6.5"
   },
@@ -43,7 +42,6 @@
     "@types/jsonwebtoken": "^9.0.6",
     "@types/multer": "^2.2.0",
     "@types/node": "^20.11.24",
-    "@types/sqlite3": "^3.1.11",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0"
   }

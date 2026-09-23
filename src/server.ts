@@ -9,6 +9,7 @@ import paymentRoutes from './routes/paymentRoutes';
 import orderRoutes from './routes/orderRoutes';
 import cartRoutes from './routes/cartRoutes';
 import adminRoutes from './routes/adminRoutes';
+import sellerRoutes from './routes/sellerRoutes';
 import { prisma } from './db/prisma';
 
 const app = express();
@@ -40,6 +41,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/seller', sellerRoutes);
 
 // Health Check
 app.get('/api/health', async (req, res) => {
@@ -78,11 +80,11 @@ app.get('/', (req, res) => {
 });
 
 function assertProductionSecurityConfig() {
+  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim() === '') {
+    console.error('❌ FATAL: DATABASE_URL environment variable is required.');
+    process.exit(1);
+  }
   if (process.env.NODE_ENV === 'production') {
-    if (!process.env.DATABASE_URL) {
-      console.error('❌ FATAL: DATABASE_URL environment variable is required in production.');
-      process.exit(1);
-    }
     if (
       !process.env.JWT_SECRET ||
       process.env.JWT_SECRET.length < 32 ||
@@ -92,33 +94,27 @@ function assertProductionSecurityConfig() {
       console.error('❌ FATAL: A secure, high-entropy JWT_SECRET (minimum 32 characters) is required in production.');
       process.exit(1);
     }
-  }
-}
 
-async function ensureSchemaSync() {
-  try {
-    console.log('🔄 Verifying and syncing database schema columns...');
-    const statements = [
-      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "idempotencyKey" TEXT;`,
-      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "campusCode" TEXT;`,
-      `ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "contactPhone" TEXT;`,
-      `ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "idempotencyKey" TEXT;`,
-      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "deliveryAddress" TEXT;`,
-      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "notesToSeller" TEXT;`,
-      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "acceptedAt" TIMESTAMP(3);`,
-      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "deliveredAt" TIMESTAMP(3);`,
-      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "completedAt" TIMESTAMP(3);`,
-      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "cancelledAt" TIMESTAMP(3);`,
-      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "cancellationReason" TEXT;`,
-      `ALTER TABLE "SubOrder" ADD COLUMN IF NOT EXISTS "cancelledByUserId" TEXT;`,
-    ];
-
-    for (const sql of statements) {
-      await prisma.$executeRawUnsafe(sql);
+    if (!process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_SECRET_KEY.trim() === '') {
+      console.error('❌ FATAL: PAYSTACK_SECRET_KEY environment variable is required in production.');
+      process.exit(1);
     }
-    console.log('✅ Database schema columns verified and synchronized!');
-  } catch (err: any) {
-    console.warn('⚠️ Schema sync notice (non-fatal):', err.message);
+
+    if (
+      !process.env.CLOUDINARY_CLOUD_NAME ||
+      !process.env.CLOUDINARY_API_KEY ||
+      !process.env.CLOUDINARY_API_SECRET
+    ) {
+      console.error(
+        '❌ FATAL: Cloudinary CDN credentials (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are required in production.'
+      );
+      process.exit(1);
+    }
+
+    if (!process.env.MNOTIFY_API_KEY || process.env.MNOTIFY_API_KEY.trim() === '') {
+      console.error('❌ FATAL: MNOTIFY_API_KEY environment variable is required in production for SMS OTP delivery.');
+      process.exit(1);
+    }
   }
 }
 
@@ -130,9 +126,6 @@ async function startServer() {
     // 1. Connect to PostgreSQL via Prisma
     await prisma.$connect();
     console.log('🐘 PostgreSQL Database Connected via Prisma!');
-
-    // 2. Synchronize any missing schema columns
-    await ensureSchemaSync();
 
     const server = app.listen(PORT, () => {
       console.log(`\n==================================================`);

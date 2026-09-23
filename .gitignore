@@ -1,6 +1,9 @@
 node_modules
 dist
 .env
+.env.*
+.env*.local
+!.env.example
 *.log
 *.sqlite*
 campushustle.sqlite

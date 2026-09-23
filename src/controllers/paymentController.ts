@@ -148,6 +148,12 @@ export const initializePayment = async (req: Request, res: Response) => {
     let authorizationUrl = `https://checkout.paystack.com/simulate_${reference}`;
 
     const paystackSecretKey = getPaystackSecretKey();
+    if (!paystackSecretKey && process.env.NODE_ENV === 'production') {
+      return res.status(500).json({
+        success: false,
+        error: 'Payment gateway configuration error. PAYSTACK_SECRET_KEY is required in production.',
+      });
+    }
     if (paystackSecretKey) {
       try {
         const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {

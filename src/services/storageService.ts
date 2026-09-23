@@ -136,14 +136,18 @@ class StorageService {
   public readonly isCloudinary: boolean;
 
   constructor() {
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME || 'doxkrnkkz';
-    const apiKey = process.env.CLOUDINARY_API_KEY || '686757399225734';
-    const apiSecret = process.env.CLOUDINARY_API_SECRET || 'my0nWTzwZqBASS5J0QuR9K_Mlss';
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+    const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
+    const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
 
     if (cloudName && apiKey && apiSecret) {
       this.provider = new CloudinaryStorageProvider(cloudName, apiKey, apiSecret);
       this.isCloudinary = true;
       console.log('☁️ Storage Provider: Cloudinary CDN Connected');
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'FATAL SECURITY ERROR: Cloudinary CDN credentials (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET) are required in production.'
+      );
     } else {
       this.provider = new LocalStorageProvider();
       this.isCloudinary = false;

@@ -91,7 +91,19 @@ export async function seedDatabase() {
       create: cat,
     });
   }
-  console.log(`✅ Seeded ${categories.length} Hustle Categories.`);
+  // 3. Seed Default Platform Financial Configuration
+  await prisma.platformConfig.upsert({
+    where: { configKey: 'DEFAULT' },
+    update: {},
+    create: {
+      configKey: 'DEFAULT',
+      commissionRate: 0.0500, // 5% default commission
+      isPayoutsEnabled: true,
+      payoutHoldHours: 24,
+      minPayoutAmount: 1.00,
+    },
+  });
+  console.log('✅ Seeded Default Platform Configuration (5.0% commission).');
   console.log('🎉 Seeding Complete!');
 }
 

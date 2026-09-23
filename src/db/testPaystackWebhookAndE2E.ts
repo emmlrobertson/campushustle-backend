@@ -36,10 +36,13 @@ function createMockReqRes(options: {
   };
 }
 
+const initialSecret = process.env.PAYSTACK_SECRET_KEY;
+
 async function runPaystackAndCommerceTests() {
   console.log('🧪 Starting Paystack Webhook, Cart, & Escrow Lifecycle Tests...\n');
 
-  const secret = process.env.PAYSTACK_SECRET_KEY || 'test_paystack_secret_key_2026_dev_mode';
+  // Clearly isolated mock secret for testing HMAC SHA512 signature calculation
+  const secret = initialSecret || 'isolated_mock_paystack_secret_for_webhook_signature_tests';
   process.env.PAYSTACK_SECRET_KEY = secret;
 
   // 1. Setup Student & Order
@@ -257,5 +260,10 @@ runPaystackAndCommerceTests()
     process.exit(1);
   })
   .finally(async () => {
+    if (initialSecret !== undefined) {
+      process.env.PAYSTACK_SECRET_KEY = initialSecret;
+    } else {
+      delete process.env.PAYSTACK_SECRET_KEY;
+    }
     await prisma.$disconnect();
   });

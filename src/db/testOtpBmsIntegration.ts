@@ -248,31 +248,36 @@ async function runComprehensiveOtpBmsTests() {
   // --------------------------------------------------------------------------
   // LIVE TEST: Dispatch with User Provided API Key & Phone
   // --------------------------------------------------------------------------
-  console.log('\n--- LIVE BMS AFRICA / MNOTIFY TEST (Target: 0535469296) ---');
-  const liveApiKey = '23T6LuKlZd0LAqpvoAJ6WyJXQ';
-  const livePhone = '0535469296';
-  const liveOtp = generateNumericOtp();
-  console.log(`📡 Attempting live BMS OTP dispatch to ${livePhone}...`);
+  console.log('\n--- LIVE BMS AFRICA / MNOTIFY TEST (Optional) ---');
+  const liveApiKey = process.env.MNOTIFY_API_KEY?.trim();
+  const livePhone = process.env.TEST_PHONE || '0535469296';
 
-  try {
-    const liveResponse = await sendViaMNotify(
-      liveApiKey,
-      livePhone,
-      `Your CampusHustle verification code is: ${liveOtp}. Valid for 10 minutes.`
-    );
-    console.log('🎉 LIVE BMS DISPATCH SUCCESSFUL!');
-    console.log('📄 BMS Response Status:', liveResponse.status);
-    console.log('📄 BMS Response Code:', liveResponse.code);
-    console.log('📄 BMS Message:', liveResponse.message);
-    if (liveResponse.summary) {
-      console.log('📄 Campaign ID (_id):', liveResponse.summary._id);
-      console.log('📄 Total Sent:', liveResponse.summary.total_sent);
-      console.log('📄 Total Rejected:', liveResponse.summary.total_rejected);
+  if (!liveApiKey) {
+    console.log('ℹ️ Skipping live BMS dispatch test: MNOTIFY_API_KEY environment variable not configured.');
+  } else {
+    const liveOtp = generateNumericOtp();
+    console.log(`📡 Attempting live BMS OTP dispatch to ${livePhone}...`);
+
+    try {
+      const liveResponse = await sendViaMNotify(
+        liveApiKey,
+        livePhone,
+        `Your CampusHustle verification code is: ${liveOtp}. Valid for 10 minutes.`
+      );
+      console.log('🎉 LIVE BMS DISPATCH SUCCESSFUL!');
+      console.log('📄 BMS Response Status:', liveResponse.status);
+      console.log('📄 BMS Response Code:', liveResponse.code);
+      console.log('📄 BMS Message:', liveResponse.message);
+      if (liveResponse.summary) {
+        console.log('📄 Campaign ID (_id):', liveResponse.summary._id);
+        console.log('📄 Total Sent:', liveResponse.summary.total_sent);
+        console.log('📄 Total Rejected:', liveResponse.summary.total_rejected);
+      }
+    } catch (liveErr: any) {
+      console.log('⚠️ Live BMS Response / Diagnostic:');
+      console.log(liveErr.message);
+      console.log('Note: If BMS returns unapproved sender ID, register "CampHustle" in your BMS dashboard or set BMS_SENDER_ID to an approved ID.');
     }
-  } catch (liveErr: any) {
-    console.log('⚠️ Live BMS Response / Diagnostic:');
-    console.log(liveErr.message);
-    console.log('Note: If BMS returns unapproved sender ID, register "CampHustle" in your BMS dashboard or set BMS_SENDER_ID to an approved ID.');
   }
 
   // Cleanup test records

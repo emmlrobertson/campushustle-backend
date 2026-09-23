@@ -77,13 +77,46 @@ enum PaymentStatus {
   SUCCESS
   FAILED
   ABANDONED
+  CANCELLED
+  REFUNDED
 }
 
+// DEPRECATED: Retained for historical record compatibility.
+// Financial architecture v1 uses explicit Payout and Refund models instead of internal wallet escrow.
 enum EscrowStatus {
   HELD
   RELEASED_TO_SELLER
   REFUNDED_TO_BUYER
   DISPUTED
+}
+
+enum PayoutStatus {
+  NOT_REQUIRED
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  REQUIRES_REVIEW
+}
+
+enum RefundStatus {
+  NOT_REQUESTED
+  REQUESTED
+  PROCESSING
+  SUCCESS
+  FAILED
+}
+
+enum PaymentProvider {
+  PAYSTACK
+  MANUAL_SIMULATION
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  IGNORED
 }
 
 enum PaymentMethod {
@@ -173,21 +206,28 @@ model User {
 }
 
 model SellerProfile {
-  id               String        @id @default(cuid())
-  userId           String        @unique
-  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                    String         @id @default(cuid())
+  userId                String         @unique
+  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  businessName     String?
-  bio              String?       @db.Text
-  payoutMomoNumber String
-  payoutMomoNetwork PaymentMethod @default(MTN_MOMO)
-  isVerifiedSeller Boolean       @default(false)
-  totalSalesCount  Int           @default(0)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  businessName          String?
+  bio                   String?        @db.Text
+  payoutMomoNumber      String
+  payoutMomoNetwork      PaymentMethod  @default(MTN_MOMO)
+  isVerifiedSeller      Boolean        @default(false)
+  totalSalesCount       Int            @default(0)
 
-  hustles          Hustle[]
-  subOrders        SubOrder[]    @relation("SellerSubOrders")
+  // Paystack Transfer Recipient Details
+  paystackRecipientCode String?        // Paystack Transfer Recipient code (e.g. RCP_xxxxx)
+  verifiedAccountName   String?        // Verified MoMo Account Name from provider
+  isPayoutVerified      Boolean        @default(false)
+
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  hustles               Hustle[]
+  subOrders             SubOrder[]     @relation("SellerSubOrders")
+  payouts               Payout[]
 
   @@index([userId])
 }
@@ -330,24 +370,27 @@ model CartItem {
 // ----------------------------------------------------------------------------
 
 model Order {
-  id             String      @id @default(cuid())
-  orderNumber    String      @unique // "CH-KNUST-2026-00123"
-  buyerId        String
-  buyer          User        @relation("BuyerOrders", fields: [buyerId], references: [id])
+  id                  String               @id @default(cuid())
+  orderNumber         String               @unique // "CH-KNUST-2026-00123"
+  buyerId             String
+  buyer               User                 @relation("BuyerOrders", fields: [buyerId], references: [id])
   
-  totalAmount    Decimal     @db.Decimal(10, 2)
-  currency       String      @default("GHS")
-  status         OrderStatus @default(PENDING_PAYMENT)
+  totalAmount         Decimal              @db.Decimal(10, 2)
+  currency            String               @default("GHS")
+  status              OrderStatus          @default(PENDING_PAYMENT)
   
-  idempotencyKey String?     @unique
-  campusCode     String?
-  contactPhone   String?
+  idempotencyKey      String?              @unique
+  campusCode          String?
+  contactPhone        String?
 
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
-  subOrders      SubOrder[]
-  payments       Payment[]
+  subOrders           SubOrder[]
+  payments            Payment[]
+  payouts             Payout[]
+  refunds             Refund[]
+  platformCommissions PlatformCommission[]
 
   @@index([buyerId, createdAt(sort: Desc)])
   @@index([orderNumber])
@@ -355,34 +398,45 @@ model Order {
 }
 
 model SubOrder {
-  id                 String         @id @default(cuid())
-  subOrderNumber     String         @unique // "CH-KNUST-2026-00123-A"
-  orderId            String
-  order              Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id                  String               @id @default(cuid())
+  subOrderNumber      String               @unique // "CH-KNUST-2026-00123-A"
+  orderId             String
+  order               Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
   
-  sellerProfileId    String
-  sellerProfile      SellerProfile  @relation("SellerSubOrders", fields: [sellerProfileId], references: [id])
+  sellerProfileId     String
+  sellerProfile       SellerProfile        @relation("SellerSubOrders", fields: [sellerProfileId], references: [id])
 
-  status             SubOrderStatus @default(PENDING_ACCEPTANCE)
-  escrowStatus       EscrowStatus   @default(HELD)
-
-  subtotal           Decimal        @db.Decimal(10, 2)
-  deliveryMode       DeliveryMode   @default(TO_CLIENT)
-  meetupLocation     String
-  deliveryAddress    String?
-  notesToSeller      String?        @db.Text
+  status              SubOrderStatus       @default(PENDING_ACCEPTANCE)
   
-  acceptedAt         DateTime?
-  deliveredAt        DateTime?
-  completedAt        DateTime?
-  cancelledAt        DateTime?
-  cancellationReason String?
-  cancelledByUserId  String?
+  // DEPRECATED: Retained for backward compatibility with existing records and tests.
+  // Financial architecture v1 uses explicit Payout and Refund models instead of internal wallet escrow.
+  escrowStatus        EscrowStatus         @default(HELD)
 
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  subtotal            Decimal              @db.Decimal(10, 2)
+  deliveryMode        DeliveryMode         @default(TO_CLIENT)
+  meetupLocation      String
+  deliveryAddress     String?
+  notesToSeller       String?              @db.Text
+  
+  // Commission snapshot fields (persisted per transaction so rate changes never alter history)
+  commissionRate      Decimal?             @default(0.0500) @db.Decimal(5, 4)
+  commissionAmount    Decimal?             @default(0.00) @db.Decimal(10, 2)
+  netSellerAmount     Decimal?             @default(0.00) @db.Decimal(10, 2)
 
-  items              OrderItem[]
+  acceptedAt          DateTime?
+  deliveredAt         DateTime?
+  completedAt         DateTime?
+  cancelledAt         DateTime?
+  cancellationReason  String?
+  cancelledByUserId   String?
+
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  items               OrderItem[]
+  payout              Payout?
+  refunds             Refund[]
+  platformCommissions PlatformCommission[]
 
   @@index([sellerProfileId, status])
   @@index([orderId])
@@ -408,26 +462,162 @@ model OrderItem {
 }
 
 model Payment {
-  id              String        @id @default(cuid())
-  orderId         String
-  order           Order         @relation(fields: [orderId], references: [id])
+  id                  String               @id @default(cuid())
+  orderId             String
+  order               Order                @relation(fields: [orderId], references: [id])
   
-  reference       String        @unique
-  idempotencyKey  String?       @unique
-  amount          Decimal       @db.Decimal(10, 2)
-  currency        String        @default("GHS")
-  paymentMethod   PaymentMethod @default(MTN_MOMO)
-  momoNumber      String
-  status          PaymentStatus @default(INITIALIZED)
+  reference           String               @unique
+  providerReference   String?              // Gateway transaction ID / reference
+  provider            PaymentProvider      @default(PAYSTACK)
+  idempotencyKey      String?              @unique
+  amount              Decimal              @db.Decimal(10, 2)
+  currency            String               @default("GHS")
+  paymentMethod       PaymentMethod        @default(MTN_MOMO)
+  momoNumber          String
+  status              PaymentStatus        @default(INITIALIZED)
   
-  gatewayResponse String?
-  paidAt          DateTime?
-  rawMetadata     Json?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  gatewayResponse     String?
+  paidAt              DateTime?
+  rawMetadata         Json?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  refunds             Refund[]
+  platformCommissions PlatformCommission[]
 
   @@index([reference])
   @@index([orderId])
+  @@index([providerReference])
+}
+
+// ----------------------------------------------------------------------------
+// 4B. PLATFORM SETTINGS, PAYOUTS, COMMISSIONS & REFUNDS DOMAIN
+// ----------------------------------------------------------------------------
+
+model PlatformConfig {
+  id               String   @id @default(cuid())
+  configKey        String   @unique @default("DEFAULT")
+  commissionRate   Decimal  @default(0.0500) @db.Decimal(5, 4) // e.g. 0.0500 = 5%
+  isPayoutsEnabled Boolean  @default(true)
+  payoutHoldHours  Int      @default(24) // Hold period in hours before settlement eligibility
+  minPayoutAmount  Decimal  @default(1.00) @db.Decimal(10, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model PlatformCommission {
+  id               String    @id @default(cuid())
+  orderId          String
+  order            Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  subOrderId       String?
+  subOrder         SubOrder? @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
+  paymentId        String?
+  payment          Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  rateApplied      Decimal   @db.Decimal(5, 4) // Actual rate snapshot applied (e.g. 0.0500)
+  grossAmount      Decimal   @db.Decimal(10, 2)
+  commissionAmount Decimal   @db.Decimal(10, 2)
+  netSellerAmount  Decimal   @db.Decimal(10, 2)
+  currency         String    @default("GHS")
+
+  recordedAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([orderId])
+  @@index([subOrderId])
+  @@index([paymentId])
+  @@index([recordedAt])
+}
+
+model Payout {
+  id                    String          @id @default(cuid())
+  subOrderId            String          @unique
+  subOrder              SubOrder        @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
+  orderId               String
+  order                 Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  sellerProfileId       String
+  sellerProfile         SellerProfile   @relation(fields: [sellerProfileId], references: [id])
+
+  grossAmount           Decimal         @db.Decimal(10, 2) // SubOrder subtotal
+  commissionAmount      Decimal         @db.Decimal(10, 2) // Platform commission retained
+  payoutAmount          Decimal         @db.Decimal(10, 2) // Net seller payout (gross - commission)
+  currency              String          @default("GHS")
+
+  recipientIdentifier   String          // MoMo account phone number
+  recipientName         String?         // Account name verified by Paystack
+  providerRecipientCode String?         // Paystack Transfer Recipient code (RCP_xxxx)
+
+  provider              PaymentProvider @default(PAYSTACK)
+  providerReference     String?         // Paystack Transfer code/reference (TRF_xxxx)
+  idempotencyKey        String          @unique // Payout idempotency reference
+
+  status                PayoutStatus    @default(PENDING)
+  failureReason         String?         @db.Text
+
+  eligibleAt            DateTime?       // When settlement becomes eligible after delivery hold
+  initiatedAt           DateTime?       // When transfer request was sent to gateway
+  confirmedAt           DateTime?       // When gateway confirmed transfer success/failure
+
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([sellerProfileId, status])
+  @@index([orderId])
+  @@index([subOrderId])
+  @@index([status, eligibleAt])
+  @@index([providerReference])
+  @@index([idempotencyKey])
+}
+
+model Refund {
+  id                String          @id @default(cuid())
+  orderId           String
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  subOrderId        String?
+  subOrder          SubOrder?       @relation(fields: [subOrderId], references: [id], onDelete: SetNull)
+  paymentId         String
+  payment           Payment         @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  amount            Decimal         @db.Decimal(10, 2)
+  currency          String          @default("GHS")
+
+  provider          PaymentProvider @default(PAYSTACK)
+  providerReference String?         // Gateway refund reference
+  idempotencyKey    String          @unique // Refund idempotency key
+
+  status            RefundStatus    @default(NOT_REQUESTED)
+  reason            String          @db.Text
+  failureReason     String?         @db.Text
+
+  requestedAt       DateTime        @default(now())
+  processedAt       DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([orderId])
+  @@index([subOrderId])
+  @@index([paymentId])
+  @@index([status])
+  @@index([providerReference])
+  @@index([idempotencyKey])
+}
+
+model WebhookEvent {
+  id           String             @id @default(cuid())
+  provider     PaymentProvider    @default(PAYSTACK)
+  eventId      String             @unique // Unique event ID / signature hash for strict idempotency
+  eventType    String             // e.g. "charge.success", "transfer.success", "transfer.failed"
+  status       WebhookEventStatus @default(RECEIVED)
+  payload      Json
+  errorMessage String?            @db.Text
+  processedAt  DateTime?
+  createdAt    DateTime           @default(now())
+
+  @@index([provider, eventType])
+  @@index([status])
+  @@index([createdAt])
 }
 
 // ----------------------------------------------------------------------------

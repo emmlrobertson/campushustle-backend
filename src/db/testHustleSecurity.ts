@@ -10,8 +10,6 @@ import {
   createHustleReview,
 } from '../controllers/hustleController';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'campushustle_knust_dev_secret_2026_super_secure';
-
 // Helper to mock Express req/res
 function createMockReqRes(options: {
   body?: any;

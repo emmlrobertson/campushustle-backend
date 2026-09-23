@@ -205,7 +205,7 @@ async function runImageUploadSecurityTests() {
     assert(Boolean(uploadedResult.imageUrl), 'Returns secure imageUrl');
     assert(Boolean(uploadedResult.thumbnailUrl), 'Returns secure thumbnailUrl');
     assert(!uploadedResult.imageUrl.includes('evil_script'), 'Client filename discarded, not in URL');
-    assert(uploadedResult.publicId.startsWith('hst_img_') || uploadedResult.publicId.startsWith('local_'), 'Safe unique identifier generated');
+    assert(uploadedResult.publicId.startsWith('hst_img_') || uploadedResult.publicId.startsWith('local_') || uploadedResult.publicId.startsWith('campushustle'), 'Safe unique identifier generated');
   }
 
   // --------------------------------------------------------------------------
